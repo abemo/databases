@@ -20,6 +20,11 @@ class Neo4JConnector:
     def add_links(self, page, links):
         with self._driver.session() as session:
             session.execute_write(self._create_links, page, links)
+            
+    def flush_db(self):
+        print("Flushing DB...")
+        with self._driver.session() as session:
+            session.execute_write(self._flush_db)
     
     @staticmethod
     def _create_and_return_greeting(tx, message):
@@ -30,13 +35,23 @@ class Neo4JConnector:
     
     @staticmethod
     def _create_links(tx, page, links):
+        page = page.decode("utf-8")
+        tx.run("CREATE (:Page {url: $page})", page=page)
         for link in links:
-            tx.run("CREATE (:Page { url: $link }) -[:LINKS_TO]-> (:Page { url: $page })", link=str(link), page=str(page))
-        
+            tx.run("MATCH (p:Page) WHERE p.url = $page "
+                   "CREATE (:Page {url: $link}) -[:LINKS_TO]-> (p)", 
+                   link=link, page=page)
+        # for link in links:
+        #     tx.run("CREATE (:Page { url: $link }) -[:LINKS_TO]-> (:Page { url: $page })", link=str(link), page=page.decode("utf-8"))
+    
+    @staticmethod
+    def _flush_db(tx):
+        tx.run("MATCH (a) -[r]-> () DELETE a, r")
+        tx.run("MATCH (a) DELETE a")
 
 neo4j_connector = Neo4JConnector("bolt://127.0.0.1:7689", "neo4j", "db_is_awesom3")
-# connector.print_greeting("Hello, World!")
-# neo4j_connector.add_links(page, links)
+neo4j_connector.flush_db()
+# exit()
 
 def write_to_elastic(es, url, html):
     es.index(index="webcrawler-index", body={"html": html})
@@ -75,12 +90,10 @@ es = Elasticsearch(
     cloud_id=CLOUD_ID,
     basic_auth=("elastic", ELASTIC_PASSWORD),
 )
-# es.indices.create(index="my-index")
 
 start_url = "https://en.wikipedia.org/wiki/Redis"
 r.lpush("links", start_url)
-# r.lpush("links", start_url)
-# r.lpush("links", start_url)
+
 
 idx = 0
 while link := r.rpop('links'): 
@@ -88,7 +101,6 @@ while link := r.rpop('links'):
         print("Found Jesus!")
         break
     crawl(browser, r, es, link, neo4j_connector)
-    # write_to_elastic(es, idx, "rawHTMLstring")
     idx += 1
     
     
