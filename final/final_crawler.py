@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 import redis
 from elasticsearch import Elasticsearch, helpers
+from espandas import Espandas
 import warnings
 
 # ignore deprecation warnings
@@ -24,56 +25,75 @@ def write_to_elastic(es, index, df):
     es.index(index=index, body=df.to_dict(orient='records'))
     
 
-def get_tower_data(browser, redis, elasticsearch, url):
+def get_tower_data(browser, es, esp, url):
     print("Downloading tower page...")
     browser.open(url)
     
     tables = browser.get_current_page().find_all('table')
     upgrade_tables = tables[1:16]
     
-    #TODO : write to the db
+    tower_data = {}  # TODO
+    write_to_elastic(es, index='tower_index', df=pd.DataFrame([tower_data]))
     
     
 
-def scrape_towers(browser, r, es, url):
+def scrape_towers(browser, es, esp, url):
     print("Downloading main page...")
     browser.open(url)
     
     tables = browser.get_current_page().find_all('table')
+    image_paths = []
+    tower_urls = []
 
     # Get the primary towers table
     primary_towers = tables[1]
-    primary_towers_df = pd.read_html(str(primary_towers))[0]
-    primary_towers_df.columns = ['Name', 'Description', 'Cost']
-    # print(primary_towers_df)
+    primary_towers_df = pd.read_html(str(primary_towers), extract_links="all")[0]
+    # print(primary_towers_dict)
+    primary_urls = primary_towers.find_all('a')
+    primary_urls = [img.get('href') for img in primary_urls if img]
+    primary_urls = [img for img in primary_urls if img.startswith('/wiki')]
+    for url in primary_urls: 
+        tower_urls.append(url)
 
     # Get the military towers table
     military_towers = tables[2]
     military_towers_df = pd.read_html(str(military_towers))[0]
-    military_towers_df.columns = ['Name', 'Description', 'Cost']
+    military_urls = military_towers.find_all('a')
+    military_urls = [img.get('href') for img in military_urls if img]
+    military_urls = [img for img in military_urls if img.startswith('/wiki')]
+    for url in military_urls: 
+        tower_urls.append(url)
     # print(military_towers_df)
 
     # Get the magic towers table
     magic_towers = tables[3]
     magic_towers_df = pd.read_html(str(magic_towers))[0]
-    magic_towers_df.columns = ['Name', 'Description', 'Cost']
+    magic_urls = magic_towers.find_all('a')
+    magic_urls = [img.get('href') for img in magic_urls if img]
+    magic_urls = [img for img in magic_urls if img.startswith('/wiki')]
+    for url in magic_urls: 
+        tower_urls.append(url)
     # print(magic_towers_df)
 
     # Get the support towers table
     support_towers = tables[4]
     support_towers_df = pd.read_html(str(support_towers))[0]
-    support_towers_df.columns = ['Name', 'Image', 'url' 'Description', 'Cost']
-    # print(support_towers_df)
+    support_urls = support_towers.find_all('a')
+    support_urls = [img.get('href') for img in support_urls if img]
+    support_urls = [img for img in support_urls if img.startswith('/wiki')]
+    for url in support_urls: 
+        tower_urls.append(url)
+    # print(support_towers_df) 
     
-    get_tower_data(browser, r, es, "https://bloons.fandom.com/wiki/Engineer_Monkey_(BTD6)")
+    # print(tower_urls)
+    for tower_url in tower_urls:
+        get_tower_data(browser, es, tower_url)
     
 
 
 # Get the url for the wiki and open it with mechanicalsoup
 url = "https://bloons.fandom.com/wiki/Bloons_TD_6"
 browser = mechanicalsoup.StatefulBrowser()
-r = redis.Redis()
-r.flushall()
 
 # Create an elasticsearch instance and connect to the database
 ELASTIC_PASSWORD = "8vOlwiUOmMxYPLTWZS9djeMm"
@@ -84,7 +104,9 @@ es = Elasticsearch(
     basic_auth=("elastic", ELASTIC_PASSWORD),
 )
 
-scrape_towers(browser, r, es, url)
+esp = Espandas()
+
+scrape_towers(browser, es, esp, url)
 
 
 
