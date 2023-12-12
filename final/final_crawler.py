@@ -10,85 +10,51 @@ All of the primary, military, magic, and support towers will be extracted from t
 import mechanicalsoup
 import pandas as pd
 import numpy as np
-import redis
 from elasticsearch import Elasticsearch, helpers
-from espandas import Espandas
-import warnings
 
 # ignore deprecation warnings
+import warnings
 warnings.filterwarnings("ignore")
-
-def write_to_elastic(es, index, df):
-    """
-    Writes a dataframe to an elasticsearch index.
-    """
-    es.index(index=index, body=df.to_dict(orient='records'))
     
 
-def get_tower_data(browser, es, esp, url):
+def get_tower_data(browser, es, url):
     print("Downloading tower page...")
-    browser.open(url)
+    browser.open('https://bloons.fandom.com'+url)
     
     tables = browser.get_current_page().find_all('table')
     upgrade_tables = tables[1:16]
-    
-    tower_data = {}  # TODO
-    write_to_elastic(es, index='tower_index', df=pd.DataFrame([tower_data]))
-    
+    for table in upgrade_tables:
+        upgrade_df = pd.read_html(str(table))[0]
+        upgrade_df = upgrade_df.dropna()
+        
+        if not upgrade_df.empty:
+            name = upgrade_df.iloc[0, 0]
+            description = upgrade_df.iloc[0, 1]
+            cost = upgrade_df.iloc[0, 2]
+            es.index(index="upgrades-index", body={"name": name, "description": description, "cost": cost})
     
 
-def scrape_towers(browser, es, esp, url):
+def scrape_towers(browser, es, url):
     print("Downloading main page...")
     browser.open(url)
     
     tables = browser.get_current_page().find_all('table')
-    image_paths = []
     tower_urls = []
 
-    # Get the primary towers table
-    primary_towers = tables[1]
-    primary_towers_df = pd.read_html(str(primary_towers), extract_links="all")[0]
-    # print(primary_towers_dict)
-    primary_urls = primary_towers.find_all('a')
-    primary_urls = [img.get('href') for img in primary_urls if img]
-    primary_urls = [img for img in primary_urls if img.startswith('/wiki')]
-    for url in primary_urls: 
-        tower_urls.append(url)
-
-    # Get the military towers table
-    military_towers = tables[2]
-    military_towers_df = pd.read_html(str(military_towers))[0]
-    military_urls = military_towers.find_all('a')
-    military_urls = [img.get('href') for img in military_urls if img]
-    military_urls = [img for img in military_urls if img.startswith('/wiki')]
-    for url in military_urls: 
-        tower_urls.append(url)
-    # print(military_towers_df)
-
-    # Get the magic towers table
-    magic_towers = tables[3]
-    magic_towers_df = pd.read_html(str(magic_towers))[0]
-    magic_urls = magic_towers.find_all('a')
-    magic_urls = [img.get('href') for img in magic_urls if img]
-    magic_urls = [img for img in magic_urls if img.startswith('/wiki')]
-    for url in magic_urls: 
-        tower_urls.append(url)
-    # print(magic_towers_df)
-
-    # Get the support towers table
-    support_towers = tables[4]
-    support_towers_df = pd.read_html(str(support_towers))[0]
-    support_urls = support_towers.find_all('a')
-    support_urls = [img.get('href') for img in support_urls if img]
-    support_urls = [img for img in support_urls if img.startswith('/wiki')]
-    for url in support_urls: 
-        tower_urls.append(url)
-    # print(support_towers_df) 
+    for idx in range(1, 5):
+        tower_table = tables[idx]
+        tower_df = pd.read_html(str(tower_table))[0]
+        tower_urls.extend([img.get('href') for img in tower_table.find_all('a', href=True) if img.get('href').startswith('/wiki')])
+        
+        for jdx in range(5):
+            tower = tower_df.iloc[jdx]
+            name = tower.iloc[0]
+            description = tower.iloc[1]
+            cost = tower.iloc[2]
+            es.index(index="tower-index", body={"Name": name, "Description": description, "Cost": cost})
     
-    # print(tower_urls)
     for tower_url in tower_urls:
         get_tower_data(browser, es, tower_url)
-    
 
 
 # Get the url for the wiki and open it with mechanicalsoup
@@ -104,9 +70,7 @@ es = Elasticsearch(
     basic_auth=("elastic", ELASTIC_PASSWORD),
 )
 
-esp = Espandas()
-
-scrape_towers(browser, es, esp, url)
+scrape_towers(browser, es, url)
 
 
 
